@@ -41,13 +41,13 @@ importance <- function(x, ...)  UseMethod("importance")
 ##' @aliases importance
 ##' @export 
 importance.ranger <- function(x, ...) {
-  if (!inherits(x, "ranger")) {
-    stop("Object ist no ranger object.")
-  }
-  if (is.null(x$variable.importance) || length(x$variable.importance) < 1) {
-    stop("No variable importance found. Please use 'importance' option when growing the forest.")
-  }
-  return(x$variable.importance)
+    if (!inherits(x, "ranger")) {
+        stop("Object ist no ranger object.")
+    }
+    if (is.null(x$variable.importance) || length(x$variable.importance) < 1) {
+        stop("No variable importance found. Please use 'importance' option when growing the forest.")
+    }
+    return(x$variable.importance)
 }
 
 ##' Compute variable importance with p-values. 
@@ -95,76 +95,83 @@ importance.ranger <- function(x, ...) {
 ##'   Altmann, A., Tolosi, L., Sander, O. & Lengauer, T. (2010). Permutation importance: a corrected feature importance measure, Bioinformatics 26:1340-1347.
 ##' @export 
 importance_pvalues <- function(x, method = c("janitza", "altmann"), num.permutations = 100, formula = NULL, data = NULL, ...) {
-  method <- match.arg(method)
-  if (!inherits(x, c("ranger", "holdoutRF"))) {
-    stop("Object is no ranger or holdoutRF object.")
-  }
-  if (x$importance.mode == "none" || is.null(x$variable.importance) || length(x$variable.importance) < 1) {
-    stop("No variable importance found. Please use 'importance' option when growing the forest.")
-  }
+    method <- match.arg(method)
+    if (!inherits(x, c("ranger", "holdoutRF"))) {
+        stop("Object is no ranger or holdoutRF object.")
+    }
+    if (x$importance.mode == "none" || is.null(x$variable.importance) || length(x$variable.importance) < 1) {
+        stop("No variable importance found. Please use 'importance' option when growing the forest.")
+    }
+    
+    if (method == "janitza") {
+        if (x$importance.mode == "impurity") {
+            stop("Impurity variable importance found. Please use (hold-out) permutation importance or corrected impurity importance to use this method.")
+        }
+        if (!inherits(x, "holdoutRF") && x$importance.mode == "permutation") {
+            warning("Permutation variable importance found, inaccurate p-values. Please use hold-out permutation importance or corrected impurity importance to use this method.")
+        }
+        if (x$treetype != "Classification") {
+            warning("This method is tested for classification only, use with care.")
+        }
+        
+        ## Mirrored VIMP
+        m1 <- x$variable.importance[x$variable.importance < 0]
+        m2 <- x$variable.importance[x$variable.importance == 0]
+        vimp <- c(m1, -m1, m2)
+        
+        ## Compute p-value
+        ## Note: ecdf is smaller or equal, problems with 0 importance values
+        nSmaller <- numSmaller(x$variable.importance, vimp)
+        pval <- 1 - nSmaller / length(vimp)
+        pval.biased <- 1 - (1+nSmaller)/(1+2*length(vimp))
 
-  if (method == "janitza") {
-    if (x$importance.mode == "impurity") {
-      stop("Impurity variable importance found. Please use (hold-out) permutation importance or corrected impurity importance to use this method.")
-    }
-    if (!inherits(x, "holdoutRF") && x$importance.mode == "permutation") {
-      warning("Permutation variable importance found, inaccurate p-values. Please use hold-out permutation importance or corrected impurity importance to use this method.")
-    }
-    if (x$treetype != "Classification") {
-      warning("This method is tested for classification only, use with care.")
-    }
-    
-    ## Mirrored VIMP
-    m1 <- x$variable.importance[x$variable.importance < 0]
-    m2 <- x$variable.importance[x$variable.importance == 0]
-    vimp <- c(m1, -m1, m2)
-    
-    ## Compute p-value
-    ## Note: ecdf is smaller or equal, problems with 0 importance values
-    pval <- 1 - numSmaller(x$variable.importance, vimp) / length(vimp)
-    
-    ## TODO: 100 ok? increase? 
-    if (length(m1) == 0) {
-      stop("No negative importance values found. Consider the 'altmann' approach.")
-    }
-    if (length(m1) < 100) {
-      warning("Only few negative importance values found, inaccurate p-values. Consider the 'altmann' approach.")
-    }
-  } else if (method == "altmann") {
-    if (!inherits(x, "ranger")) {
-      stop("Altmann method not available for holdoutRF objects.")
-    }
-    if (is.null(formula) || is.null(data)) {
-      stop("Formula and data required for the 'altmann' method.")
-    }
-    if (is.character(formula)) {
-      formula <- formula(formula)
-    }
-    
-    ## Permute and compute importance again
-    if (x$treetype == "Survival") {
-      dependent.variable.name <- all.vars(formula)[1:2]
+                ## TODO: 100 ok? increase? 
+        if (length(m1) == 0) {
+            stop("No negative importance values found. Consider the 'altmann' approach.")
+        }
+        if (length(m1) < 100) {
+            warning("Only few negative importance values found, inaccurate p-values. Consider the 'altmann' approach.")
+        }
+    } else if (method == "altmann") {
+        if (!inherits(x, "ranger")) {
+            stop("Altmann method not available for holdoutRF objects.")
+        }
+        if (is.null(formula) || is.null(data)) {
+            stop("Formula and data required for the 'altmann' method.")
+        }
+        if (is.character(formula)) {
+            formula <- formula(formula)
+        }
+        
+        ## Permute and compute importance again
+        if (x$treetype == "Survival") {
+            dependent.variable.name <- all.vars(formula)[1:2]
+        } else {
+            dependent.variable.name <- all.vars(formula)[1]
+        }
+        vimp <- sapply(1:num.permutations, function(i) {
+            dat <- data
+            dat[, dependent.variable.name] <- dat[sample(nrow(dat)), dependent.variable.name]
+            ranger(formula, dat, num.trees = x$num.trees, mtry = x$mtry, min.node.size = x$min.node.size, 
+                         importance = x$importance.mode, replace = x$replace, ...)$variable.importance
+        })
+        
+        ## Compute p-value
+        pval <- sapply(1:nrow(vimp), function(i) {
+            (sum(vimp[i, ] >= x$variable.importance[i]) + 1)/(ncol(vimp) + 1)
+        })
+        
     } else {
-      dependent.variable.name <- all.vars(formula)[1]
+        stop("Unknown p-value method. Available methods are: 'janitza' and 'altmann'.")
     }
-    vimp <- sapply(1:num.permutations, function(i) {
-      dat <- data
-      dat[, dependent.variable.name] <- dat[sample(nrow(dat)), dependent.variable.name]
-      ranger(formula, dat, num.trees = x$num.trees, mtry = x$mtry, min.node.size = x$min.node.size, 
-             importance = x$importance.mode, replace = x$replace, ...)$variable.importance
-    })
     
-    ## Compute p-value
-    pval <- sapply(1:nrow(vimp), function(i) {
-      (sum(vimp[i, ] >= x$variable.importance[i]) + 1)/(ncol(vimp) + 1)
-    })
-
-  } else {
-    stop("Unknown p-value method. Available methods are: 'janitza' and 'altmann'.")
-  }
-  
-  ## Return VIMP and p-values
-  res <- cbind(x$variable.importance, pval)
-  colnames(res) <- c("importance", "pvalue")
-  return(res)
+    ## Return VIMP and p-values
+    res <- cbind(x$variable.importance, pval)
+    colnames(res) <- c("importance", "pvalue")
+    if(method=="janitza") {
+        res <- cbind(res, pval.biased, nSmaller, rep(2*length(vimp), nrow(res)), rep(length(m1), nrow(res)))
+        colnames(res)[3:6] <- c("pvalue.biased", "nSmaller", "n.perm", "n.neg.imps")
+    }
+    
+    return(res)
 }
