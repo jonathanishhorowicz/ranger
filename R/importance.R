@@ -122,10 +122,11 @@ importance_pvalues <- function(x, method = c("janitza", "altmann"), num.permutat
         ## Compute p-value
         ## Note: ecdf is smaller or equal, problems with 0 importance values
         nSmaller <- numSmaller(x$variable.importance, vimp)
-        pval <- 1 - nSmaller / length(vimp)
-        pval.biased <- 1 - (1+nSmaller)/(1+2*length(vimp))
 
-                ## TODO: 100 ok? increase? 
+        pval <- 1 - nSmaller / length(vimp)
+        pval.biased <- (1+length(vimp)-nSmaller)/(1+length(vimp))
+
+        ## TODO: 100 ok? increase? 
         if (length(m1) == 0) {
             stop("No negative importance values found. Consider the 'altmann' approach.")
         }
@@ -169,7 +170,7 @@ importance_pvalues <- function(x, method = c("janitza", "altmann"), num.permutat
     res <- cbind(x$variable.importance, pval)
     colnames(res) <- c("importance", "pvalue")
     if(method=="janitza") {
-        res <- cbind(res, pval.biased, nSmaller, rep(2*length(vimp), nrow(res)), rep(length(m1), nrow(res)))
+        res <- cbind(res, pval.biased, nSmaller, rep(length(vimp), nrow(res)), rep(length(m1), nrow(res)))
         colnames(res)[3:6] <- c("pvalue.biased", "nSmaller", "n.perm", "n.neg.imps")
     }
     
